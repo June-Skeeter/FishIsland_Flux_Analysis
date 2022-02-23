@@ -1,3 +1,3 @@
 # Thesis_Code
 
-A collection of programs I've used in my PhD thesis for EC data anaysis and mapping.
+A collection of scripts I've written while working on my PhD thesis.
