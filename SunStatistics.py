@@ -3,7 +3,9 @@
 # Equations Adapted From:
 # https://gml.noaa.gov/grad/solcalc/calcdetails.html
 
-def SunStas(LAT,LON,JD,TIME,TZ):
+import numpy as np
+
+def SunStats(LAT,LON,JD,TIME,TZ):
     F2 = JD+TIME-TZ/24 ## Use PD.to_julian
     G2 = (F2-2451545)/36525 #Julian Century
     I2 = (280.46646+G2*(36000.76983 + G2*0.0003032))%360 #Geom Mean Long Sun (deg)
@@ -29,31 +31,32 @@ def SunStas(LAT,LON,JD,TIME,TZ):
     AA2=8*W2 #Sunlight Duration (minutes)
     AB2=(TIME*1440+V2+4*LON-60*TZ)%1440 # True Solar Time (min)
 
-    if AB2/4<0:
-        AC2=AB2/4+180# Hour Angle (deg)
-    else:
-        AC2=AB2/4-180# Hour Angle (deg)
+    AC2 = AB2*1
+    AC2[AB2/4<0] = AB2[AB2/4<0]/4+180
+    AC2[AB2/4>0] = AB2[AB2/4>00]/4+180
 
     AD2 = np.degrees(np.arccos(np.sin(np.radians(LAT))*np.sin(np.radians(T2))+np.cos(np.radians(LAT))*np.cos(np.radians(T2))*np.cos(np.radians(AC2))))# Solar Zenith Angle (deg)
 
-    # np.degrees(ACOS(SIN(np.radians($B$2))*SIN(np.radians(T2))+COS(np.radians($B$2))*COS(np.radians(T2))*COS(np.radians(AC2))))
-
     AE2 = 90-AD2 #Solar Elevation Angle (deg)
-    AF2 = 0/3600
-    if AE2>85:
-        AF2 = 0
-    elif AE2>5:
-        AF2 = 58.1/np.tan(np.radians(AE2))-0.07/((np.tan(np.radians(AE2)))**3)+0.000086/(np.tan(np.radians(AE2))**5)
-    elif AE2>-0.575:
-        AF2 = 1735+AE2*(-518.2+AE2*(103.4+AE2*(-12.79+AE2*0.711)))
-    else:
-        AF2 = -20.772/np.tan(np.radians(AE2))
-    AF2/=3600#pprox Atmospheric Refraction (deg)
-    Elevation = AE2+AF2 #Solar Elevation corrected for atm refraction (deg)
+    AF2 = AE2*0
 
-    if AC2>0:
-        Azimuth = (np.degrees(np.arccos(((np.sin(np.radians(LAT))*np.cos(np.radians(AD2)))-np.sin(np.radians(T2)))/(np.cos(np.radians(LAT))*np.sin(np.radians(AD2)))))+180)%360
-    else:
-        Azimuth = (540-np.degrees(np.arccos(((np.sin(np.radians(LAT))*np.cos(np.radians(AD2)))-np.sin(np.radians(T2)))/(np.cos(np.radians(LAT))*np.sin(np.radians(AD2))))))%360
-    # Solar Azimuth Angle (deg cw from N)
-    return(AD2,AE2,Elevation,Azimuth,Y2,Z2)
+    AF2[AE2<=85] = 58.1/np.tan(np.radians(AE2[AE2<85]))-0.07/((np.tan(np.radians(AE2[AE2<85])))**3)+0.000086/(np.tan(np.radians(AE2[AE2<85]))**5)
+    # AF2[AE2<=5] = 1735+AE2[AE2<5]*(-518.2+AE2[AE2<5]*(103.4+AE2[AE2<5]*(-12.79+AE2[AE2<5]*0.711)))
+    # ,IF(AE8>-0.575,1735+AE8*(-518.2+AE8*(103.4+AE8*(-12.79+AE8*0.711))),
+    AF2[AE2<=5] = 1735+AE2[AE2<5]*(-518.2)+(AE2[AE2<5]**2)*(103.4)+(AE2[AE2<5]**3)*(-12.79)+((AE2[AE2<5])**4)*0.711
+    AF2[AE2<=-0.575] = -20.772/np.tan(np.radians(AE2[AE2<=-0.575]))
+
+    AF2/=3600#pprox Atmospheric Refraction (deg)
+    Angle_Corr = AE2+AF2 #Solar Elevation corrected for atm refraction (deg)
+
+    Azimuth = AC2*0
+    Azimuth[AC2>0] = (np.degrees(np.arccos(((np.sin(np.radians(LAT[AC2>0]))*np.cos(np.radians(AD2[AC2>0])))-np.sin(np.radians(T2[AC2>0])))/(np.cos(np.radians(LAT[AC2>0]))*np.sin(np.radians(AD2[AC2>0])))))+180)%360
+    Azimuth[AC2<=0] = (np.degrees(np.arccos(((np.sin(np.radians(LAT[AC2<=0]))*np.cos(np.radians(AD2[AC2<=0])))-np.sin(np.radians(T2[AC2<=0])))/(np.cos(np.radians(LAT[AC2<=0]))*np.sin(np.radians(AD2[AC2<=0])))))+180)%360
+
+    Zenith=AD2
+    Angle=AE2
+    Sunrise=Y2
+    Sunset=Z2
+
+    return(Zenith,Angle,Angle_Corr,Azimuth,Sunrise,Sunset)
+    
