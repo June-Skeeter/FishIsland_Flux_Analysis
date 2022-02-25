@@ -1,3 +1,3 @@
 # Thesis_Code
 
-A collection of scripts I've written while working on my PhD thesis.
+A collection of scripts I've used to analyze C fluxes at Fish Island, NWT.
