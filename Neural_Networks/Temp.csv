@@ -1,0 +1,2 @@
+,Model,Size,Nodes,MSE,RMSE,SE,r2,Performance,K
+8_43,u*+wind_speed+NR_Wm2_Avg+Table_1+Active_Layer_1+Temp_15_1+Polygon+Rim,8,43,40.428905050647856,6.358372830421936,0.5903063385469681,0.7492882337927196,0,30
