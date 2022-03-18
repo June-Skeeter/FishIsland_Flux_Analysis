@@ -7,13 +7,14 @@ from sklearn.utils import resample
 from sklearn import metrics
 from scipy.optimize import curve_fit
 from scipy import stats
+import SunStatistics as SS
 
 
 
 class Compile:
-    def __init__(self,Flux_Paths,Met,Soil,Daytime=None,Taglu=None,NARR=None,Drop_Variables=None):
-        self.Taglu = Taglu
-        self.NARR = NARR
+    def __init__(self,Flux_Paths,Met,Soil,PBLH,Drop_Variables=None):
+#         self.Taglu = Taglu
+#         self.NARR = NARR
         self.Fluxes = ['H','LE','co2_flux','ch4_flux']
         Flux_10 = self.Format(pd.read_csv(Flux_Paths[0],delimiter = ',',skiprows = 0,parse_dates={'datetime':[1,2]},header = 1,na_values = -9999),v=1,drop = [0,1])
         Flux_10 = Flux_10.loc[Flux_10['file_records']==18000]
@@ -30,11 +31,11 @@ class Compile:
         Flux = Flux_1.append(Flux_10)
         Met = self.Format(pd.read_csv(Met,delimiter = ',',skiprows = 1,parse_dates={'datetime':[0]},header = 0),v=2,drop = [0])
         Soil = self.Format(pd.read_csv(Soil,delimiter = ',',skiprows = 0,parse_dates={'datetime':[0]},header = 0),v=0,drop = [0])
-        BL = self.Format(pd.read_csv('C:/FishIsland_2017/BL_Data/PBLH_GFS.csv'),v=0,drop=[0])
+#         BL = self.Format(pd.read_csv(PBLH),v=0,drop=[0])
 
 
 
-        self.RawData = pd.concat([Flux,Met,Soil,BL],axis = 1, join = 'outer')
+        self.RawData = pd.concat([Flux,Met,Soil],axis = 1, join = 'outer')
         # self.RawData = self.RawData.join(Daytime,how='inner')
         # self.RawData['Daytime'] = np.ceil(self.RawData['Daytime'])
 
@@ -50,7 +51,7 @@ class Compile:
         self.RawData['UTC'] = self.RawData.index.tz_localize(self.Mt)#.tz_convert(pytz.utc)
         self.RawData = self.RawData.set_index(self.RawData['UTC'])
         self.RawData['Minute'] = self.RawData.index.hour*60+self.RawData.index.minute
-        self.RawData['Day'] = np.floor(self.RawData['DOY'])
+#         self.RawData['Day'] = np.floor(self.RawData['DOY'])
         self.uThresh = .1
         self.RawData['Radians'] = self.RawData['wind_dir']/180*np.pi
         self.RawData['North'] = self.RawData['wind_speed'] * np.cos(self.RawData['Radians'])
@@ -62,7 +63,7 @@ class Compile:
         self.RawData.loc[self.RawData['flowrate_mean']<0.0002,'co2_flux'] = np.nan
 
 
-        NarBL = pd.read_csv('C:/FishIsland_2017/BL_Data/NARR.csv',parse_dates=['datetime'],index_col=['datetime']).resample('30T').interpolate()
+        NarBL = pd.read_csv(PBLH,parse_dates=['datetime'],index_col=['datetime']).resample('30T').interpolate()
         NarBL.index = NarBL.index.tz_localize(pytz.utc).tz_convert(self.Mt)
 
         self.RawData = self.RawData.join(NarBL,how='inner')
@@ -238,62 +239,100 @@ class Compile:
             self.Data.loc[self.Data['u*']<self.uThresh,[var,var+'_drop']]=[np.nan,1]
             self.Data.loc[np.isnan(self.Data['u*'])==True,[var,var+'_drop']]=[np.nan,1]
         
-    def CustomVars(self,Hours=24):
-        self.Data['Total_Rain_mm_Tot'] = self.Data['Rain_mm_Tot'].rolling(str(Hours)+'H').sum()
-        self.Data['Total_PPFD'] = self.Data['PPFD_Avg'].rolling(str(Hours)+'H').sum()
-        self.Data['Ratio'] = self.Data['u*']/self.Data['wind_speed']
-        # self.Data['Delta_Table_1'] = self.Data['Table_1'].diff()
-        self.Data['Delta_air_pressure'] = self.Data['air_pressure'].diff()
-        self.Data['Delta_Table_1'] = self.Data['Table_1'].rolling(str(Hours)+'H').mean()-self.Data['Table_1']
-        self.Data['Delta_VWC_1'] = self.Data['VWC_1'].rolling(str(Hours)+'H').mean()-self.Data['VWC_1']
-        self.Data['Delta_VWC_2'] = self.Data['VWC_2'].rolling(str(Hours)+'H').mean()-self.Data['VWC_2']
-
+    def CustomVars(self,LAT,LON,TZ,Zm):
+        
+        self.Data['Zm'] = 2.87
+        
+        
         self.Data['fco2']=self.Data['co2_flux']
         self.Data['fch4']=self.Data['ch4_flux']
         self.Data['DOY'] = self.Data.index.dayofyear
-        # self.Data['ER'] = self.Data['co2_flux']
+        self.Data['ER'] = self.Data['co2_flux']
+        
+        
+        
+        
+        
+        Temp = self.Data[['DOY']].resample('5T').asfreq()
+        # Temp
+
+        D = Temp.index.floor('D').to_julian_date()#+.5
+        T = Temp.index.hour/24
+        A = np.ones(D.shape[0])
+
+        Zenith,Angle,Angle_Corr,Azimuth,Sunrise,Sunset=SS.SunStats(LAT*A,LON*A,D.values,T.values,TZ*A)
+        Temp['Sun_Angle'] = Angle_Corr
+        Temp = Temp.resample('30T').mean()
+        try:
+            self.Data = self.Data.drop(columns=['Sun_Angle'])
+        except:
+            pass
+        self.Data = self.Data.join(Temp[['Sun_Angle']])
+
+        self.Data['Daytime']=0
+        self.Data.loc[self.Data['Sun_Angle']>-0.5,'Daytime']=1
+
+        self.Data.loc[((self.Data.Daytime==0)&(self.Data.PPFD_Avg>10)),'Daytime']=1
+        
+        
+        self.Data['Z0'] = self.Data['Zm']*np.exp(-.41*self.Data['wind_speed']/self.Data['u*'])
+
+        # Data['Temp_15'] = Data[['Temp_15_1','Temp_15_2']].mean()
+
+        self.Data.index.name='datetime'
+        
+        
+#         self.Data['Total_Rain_mm_Tot'] = self.Data['Rain_mm_Tot'].rolling(str(Hours)+'H').sum()
+#         self.Data['Total_PPFD'] = self.Data['PPFD_Avg'].rolling(str(Hours)+'H').sum()
+#         self.Data['Ratio'] = self.Data['u*']/self.Data['wind_speed']
+#         # self.Data['Delta_Table_1'] = self.Data['Table_1'].diff()
+#         self.Data['Delta_air_pressure'] = self.Data['air_pressure'].diff()
+#         self.Data['Delta_Table_1'] = self.Data['Table_1'].rolling(str(Hours)+'H').mean()-self.Data['Table_1']
+#         self.Data['Delta_VWC_1'] = self.Data['VWC_1'].rolling(str(Hours)+'H').mean()-self.Data['VWC_1']
+#         self.Data['Delta_VWC_2'] = self.Data['VWC_2'].rolling(str(Hours)+'H').mean()-self.Data['VWC_2']
+
         # self.Data.loc[self.Data['Daytime']>0,'ER']=np.nan
-    def Soil_Data_Avg(self,ratios=[.8,.2]):
-        self.Data['Ts 2.5cm'] = self.Data['Temp_2_5_1']*ratios[0]+self.Data['Temp_2_5_2']*ratios[1]
-        self.Data['Ts 5cm'] = self.Data['Temp_5_1']*ratios[0]+self.Data['Temp_5_2']*ratios[1]
-        self.Data['Ts 15cm'] = self.Data['Temp_15_1']*ratios[0]+self.Data['Temp_15_2']*ratios[1]
+#     def Soil_Data_Avg(self,ratios=[.8,.2]):
+#         self.Data['Ts 2.5cm'] = self.Data['Temp_2_5_1']*ratios[0]+self.Data['Temp_2_5_2']*ratios[1]
+#         self.Data['Ts 5cm'] = self.Data['Temp_5_1']*ratios[0]+self.Data['Temp_5_2']*ratios[1]
+#         self.Data['Ts 15cm'] = self.Data['Temp_15_1']*ratios[0]+self.Data['Temp_15_2']*ratios[1]
 
-    def Merge(self):#,Vars,Aliases):
-        # self.Data[Aliases]=self.Data[Vars]
+#     def Merge(self):#,Vars,Aliases):
+#         # self.Data[Aliases]=self.Data[Vars]
 
-        if self.Taglu is not None:
-            # def parse(Y,m,d,H):
-            #     return datetime.datetime.strptime(f"{Y} {m} {d} {H}", "%Y %m %d %H")
-            self.dfTaglu = pd.read_csv(self.Taglu,#header=True,
-                parse_dates={'datetime':['Year','Month','Day','Time']}, 
-                 # date_parser=lambda x: pd.datetime.strptime(x, '%Y %m %d %H'),index_col=['datetime']
-                 ).set_index('datetime')
-            self.dfTaglu.index+=pd.to_timedelta(1, unit='h')
+#         if self.Taglu is not None:
+#             # def parse(Y,m,d,H):
+#             #     return datetime.datetime.strptime(f"{Y} {m} {d} {H}", "%Y %m %d %H")
+#             self.dfTaglu = pd.read_csv(self.Taglu,#header=True,
+#                 parse_dates={'datetime':['Year','Month','Day','Time']}, 
+#                  # date_parser=lambda x: pd.datetime.strptime(x, '%Y %m %d %H'),index_col=['datetime']
+#                  ).set_index('datetime')
+#             self.dfTaglu.index+=pd.to_timedelta(1, unit='h')
 
-            print(self.dfTaglu)
-            UTC = self.dfTaglu.index+timedelta(hours=6)
-            self.dfTaglu = self.dfTaglu.set_index(UTC)
-            self.dfTaglu.index = self.dfTaglu.index.tz_localize(pytz.utc).tz_convert(self.Mt)
+#             print(self.dfTaglu)
+#             UTC = self.dfTaglu.index+timedelta(hours=6)
+#             self.dfTaglu = self.dfTaglu.set_index(UTC)
+#             self.dfTaglu.index = self.dfTaglu.index.tz_localize(pytz.utc).tz_convert(self.Mt)
 
-            self.dfTagluI=self.dfTaglu.resample('30T').interpolate()
-            self.dfTagluI['Rainfall']=self.dfTaglu['Rainfall'].resample('30T').asfreq().fillna(0)
-            Side = 'right'
-            self.Data_DS = self.Data.resample('h',label=Side, closed='right').mean()
-            self.Data_DS['Rain_mm_Tot'] = self.Data.resample('h',label=Side, closed='right').sum()['Rain_mm_Tot']
-            self.AllData = pd.concat([self.Data_DS,self.dfTaglu],axis=1,join='outer')
-            self.Data = pd.concat([self.Data,self.dfTagluI],axis=1,join='inner')
+#             self.dfTagluI=self.dfTaglu.resample('30T').interpolate()
+#             self.dfTagluI['Rainfall']=self.dfTaglu['Rainfall'].resample('30T').asfreq().fillna(0)
+#             Side = 'right'
+#             self.Data_DS = self.Data.resample('h',label=Side, closed='right').mean()
+#             self.Data_DS['Rain_mm_Tot'] = self.Data.resample('h',label=Side, closed='right').sum()['Rain_mm_Tot']
+#             self.AllData = pd.concat([self.Data_DS,self.dfTaglu],axis=1,join='outer')
+#             self.Data = pd.concat([self.Data,self.dfTagluI],axis=1,join='inner')
 
-            if self.NARR is not None:
-                self.dfNARR = pd.read_csv(self.NARR,parse_dates=[0],index_col=[0])
-                self.dfNARR.index.name = 'datetime'
-                self.dfNARR[['soilw_0','soilw_10','soilw_40','soill_0','soill_10','soill_40']]*=100
-                self.dfNARRH=self.dfNARR.resample('h').interpolate()
-                self.dfNARRH['apcp']=self.dfNARR['apcp'].resample('h').asfreq().fillna(0)
-                self.dfNARR30=self.dfNARR.resample('30T').interpolate()
-                self.dfNARR30['apcp']=self.dfNARR['apcp'].resample('30T').asfreq().fillna(0)
-                self.dfNARR30['MT'] = self.dfNARR30.index.tz_localize(pytz.utc).tz_convert(self.Mt)
-                self.dfNARRH['MT'] = self.dfNARRH.index.tz_localize(pytz.utc).tz_convert(self.Mt)
-                self.dfNARR30=self.dfNARR30.set_index(pd.DatetimeIndex((self.dfNARR30['MT'])))
-                self.dfNARRH=self.dfNARRH.set_index(pd.DatetimeIndex((self.dfNARRH['MT'])))
-                self.AllData = pd.concat([self.AllData,self.dfNARRH],axis=1,join='outer')
-                self.Data = pd.concat([self.Data,self.dfNARR30],axis=1,join='inner')
+#             if self.NARR is not None:
+#                 self.dfNARR = pd.read_csv(self.NARR,parse_dates=[0],index_col=[0])
+#                 self.dfNARR.index.name = 'datetime'
+#                 self.dfNARR[['soilw_0','soilw_10','soilw_40','soill_0','soill_10','soill_40']]*=100
+#                 self.dfNARRH=self.dfNARR.resample('h').interpolate()
+#                 self.dfNARRH['apcp']=self.dfNARR['apcp'].resample('h').asfreq().fillna(0)
+#                 self.dfNARR30=self.dfNARR.resample('30T').interpolate()
+#                 self.dfNARR30['apcp']=self.dfNARR['apcp'].resample('30T').asfreq().fillna(0)
+#                 self.dfNARR30['MT'] = self.dfNARR30.index.tz_localize(pytz.utc).tz_convert(self.Mt)
+#                 self.dfNARRH['MT'] = self.dfNARRH.index.tz_localize(pytz.utc).tz_convert(self.Mt)
+#                 self.dfNARR30=self.dfNARR30.set_index(pd.DatetimeIndex((self.dfNARR30['MT'])))
+#                 self.dfNARRH=self.dfNARRH.set_index(pd.DatetimeIndex((self.dfNARRH['MT'])))
+#                 self.AllData = pd.concat([self.AllData,self.dfNARRH],axis=1,join='outer')
+#                 self.Data = pd.concat([self.Data,self.dfNARR30],axis=1,join='inner')
