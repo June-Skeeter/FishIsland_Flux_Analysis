@@ -2,6 +2,8 @@
 
 This file contains gap-filled CO2 & CH4 fluxes for the Fish Island Flux Station from the 2017 field season, as described in Skeeter et al. (2022): https://doi.org/10.1139/as-2021-0034
 
+Please contact june.skeeter@ubc.ca if you have any questions about the data.
+
 NME_Gapfilled_nmol_m2_s - gap filled CH4 fluxes in nmol m2 s-1
 * ch4_flux (observed) filtered as describe in Skeeter et al. (2022), filled with NME_est (NN estimates) as described in Skeeter et al. 2022
 
